@@ -29,7 +29,12 @@ from requests.compat import (
     is_urllib3_1,
     urlparse,
 )
-from requests.cookies import cookiejar_from_dict, morsel_to_cookie
+from requests.cookies import (
+    cookiejar_from_dict,
+    create_cookie,
+    merge_cookies,
+    morsel_to_cookie,
+)
 from requests.exceptions import (
     ChunkedEncodingError,
     ConnectionError,
@@ -420,6 +425,107 @@ class TestRequests:
         r = s.get(httpbin("cookies"), cookies={"foo": "baz"})
         assert r.json()["cookies"]["foo"] == "baz"
         # Session cookie should not be modified
+        assert s.cookies["foo"] == "bar"
+
+    def test_request_cookie_none_removes_session_cookie(self):
+        s = requests.session()
+        s.cookies.update({"from-my": "browser", "keep": "yes"})
+        req = requests.Request(
+            "GET",
+            "http://example.com/cookies",
+            cookies={"another": "cookie", "from-my": None},
+        )
+        prep = s.prepare_request(req)
+        assert prep.headers["Cookie"] == "keep=yes; another=cookie"
+        assert [(c.name, c.value) for c in prep._cookies] == [
+            ("keep", "yes"),
+            ("another", "cookie"),
+        ]
+        # Session cookies should not be modified
+        assert s.cookies.get_dict() == {"from-my": "browser", "keep": "yes"}
+
+    def test_request_cookie_none_without_session_cookie_is_omitted(self):
+        s = requests.session()
+        req = requests.Request(
+            "GET",
+            "http://example.com/cookies",
+            cookies={"another": "cookie", "ghost": None},
+        )
+        prep = s.prepare_request(req)
+        assert prep.headers["Cookie"] == "another=cookie"
+        assert not s.cookies
+
+    def test_request_cookie_none_removing_only_cookie_sends_no_header(self):
+        s = requests.session()
+        s.cookies["only"] = "1"
+        req = requests.Request(
+            "GET", "http://example.com/cookies", cookies={"only": None}
+        )
+        prep = s.prepare_request(req)
+        assert "Cookie" not in prep.headers
+        assert s.cookies["only"] == "1"
+
+    def test_request_cookie_none_removes_same_name_across_domains(self):
+        s = requests.session()
+        s.cookies.set("foo", "one", domain="example.com")
+        s.cookies.set("foo", "two", domain="other.example.com")
+        s.cookies.set("keep", "yes")
+        req = requests.Request(
+            "GET", "http://example.com/cookies", cookies={"foo": None}
+        )
+        prep = s.prepare_request(req)
+        assert prep.headers["Cookie"] == "keep=yes"
+        assert len(s.cookies) == 3
+
+    def test_request_cookie_empty_string_is_not_removed(self):
+        s = requests.session()
+        s.cookies["foo"] = "bar"
+        req = requests.Request(
+            "GET",
+            "http://example.com/cookies",
+            cookies={"foo": "", "baz": "qux"},
+        )
+        prep = s.prepare_request(req)
+        assert prep.headers["Cookie"] == "foo=; baz=qux"
+        assert s.cookies["foo"] == "bar"
+
+    def test_prepared_request_cookie_none_is_omitted(self):
+        prep = requests.Request(
+            "GET",
+            "http://example.com/cookies",
+            cookies={"another": "cookie", "ghost": None},
+        ).prepare()
+        assert prep.headers["Cookie"] == "another=cookie"
+
+    def test_cookiejar_from_dict_none_removes_existing_cookie(self):
+        jar = cookiejar_from_dict({"keep": "value", "drop": "value"})
+        cookiejar_from_dict({"drop": None, "empty": ""}, jar)
+        assert jar.get_dict() == {"keep": "value", "empty": ""}
+
+    def test_merge_cookies_dict_none_removes_existing_cookie(self):
+        jar = cookiejar_from_dict({"from-my": "browser"})
+        merge_cookies(jar, {"another": "cookie", "from-my": None})
+        assert jar.get_dict() == {"another": "cookie"}
+
+    def test_request_cookiejar_cookie_none_removes_session_cookie(self):
+        s = requests.session()
+        s.cookies.update({"foo": "bar", "keep": "yes"})
+        request_jar = requests.cookies.RequestsCookieJar()
+        request_jar.set_cookie(create_cookie("foo", None))
+        request_jar.set_cookie(create_cookie("baz", "qux"))
+        req = requests.Request("GET", "http://example.com/cookies", cookies=request_jar)
+        prep = s.prepare_request(req)
+        assert prep.headers["Cookie"] == "keep=yes; baz=qux"
+        assert s.cookies["foo"] == "bar"
+        # The caller's jar should not be mutated
+        assert request_jar.get_dict() == {"foo": None, "baz": "qux"}
+
+    def test_request_cookie_none_not_restored_on_redirect(self, httpbin):
+        s = requests.session()
+        s.cookies.update({"foo": "bar", "keep": "yes"})
+        r = s.get(httpbin("redirect/1"), cookies={"foo": None})
+        assert r.request.headers["Cookie"] == "keep=yes"
+        assert r.history[0].request.headers["Cookie"] == "keep=yes"
         assert s.cookies["foo"] == "bar"
 
     def test_request_cookies_not_persisted(self, httpbin):

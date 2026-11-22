@@ -26,6 +26,7 @@ from .cookies import (
     cookiejar_from_dict,
     extract_cookies_to_jar,
     merge_cookies,
+    remove_cookie_by_name,
 )
 from .exceptions import (
     ChunkedEncodingError,
@@ -266,6 +267,8 @@ class SessionRedirectMixin:
             cookie_jar = cast("CookieJar", prepared_request._cookies)
             extract_cookies_to_jar(cookie_jar, req, resp.raw)
             merge_cookies(cookie_jar, self.cookies)
+            for name in getattr(prepared_request, "_removed_cookie_names", ()):
+                remove_cookie_by_name(cookie_jar, name)
             prepared_request.prepare_cookies(cookie_jar)
 
             # Rebuild auth and proxy information.
@@ -523,14 +526,29 @@ class Session(SessionRedirectMixin):
 
         cookies = request.cookies or {}
 
-        # Bootstrap CookieJar.
-        if not isinstance(cookies, cookielib.CookieJar):
-            cookies = cookiejar_from_dict(cookies)
+        removed_cookie_names: set[str]
+        if isinstance(cookies, cookielib.CookieJar):
+            removed_cookie_names = {
+                cookie.name for cookie in cookies if cookie.value is None
+            }
+        elif isinstance(cookies, Mapping):
+            removed_cookie_names = {
+                name for name, value in cookies.items() if value is None
+            }
+        else:
+            removed_cookie_names = set()
 
-        # Merge with session cookies
-        merged_cookies = merge_cookies(
-            merge_cookies(RequestsCookieJar(), self.cookies), cookies
-        )
+        # Merge with session cookies. Request cookies are applied to a
+        # copy of the session jar so a value of None unsets the session
+        # cookie for this request only, mirroring merge_setting() for
+        # headers and params, and never mutates the session jar.
+        merged_cookies = merge_cookies(RequestsCookieJar(), self.cookies)
+        if isinstance(cookies, cookielib.CookieJar):
+            merged_cookies = merge_cookies(merged_cookies, cookies)
+        else:
+            merged_cookies = cookiejar_from_dict(
+                cookies, cookiejar=merged_cookies, overwrite=True
+            )
 
         # Set environment's basic authentication if not explicitly set.
         auth = request.auth
@@ -552,6 +570,7 @@ class Session(SessionRedirectMixin):
             cookies=merged_cookies,
             hooks=merge_hooks(request.hooks, self.hooks),
         )
+        p._removed_cookie_names.update(removed_cookie_names)
         return p
 
     def request(
@@ -561,7 +580,7 @@ class Session(SessionRedirectMixin):
         params: _t.ParamsType = None,
         data: _t.DataType = None,
         headers: _t.HeadersType = None,
-        cookies: RequestsCookieJar | CookieJar | dict[str, str] | None = None,
+        cookies: RequestsCookieJar | CookieJar | dict[str, str | None] | None = None,
         files: _t.FilesType = None,
         auth: _t.AuthType = None,
         timeout: _t.TimeoutType = None,

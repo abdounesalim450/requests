@@ -508,7 +508,9 @@ def dict_from_cookiejar(cj: CookieJar) -> dict[str, str | None]:
     return cookie_dict
 
 
-def add_dict_to_cookiejar(cj: CookieJar, cookie_dict: dict[str, str]) -> CookieJar:
+def add_dict_to_cookiejar(
+    cj: CookieJar, cookie_dict: dict[str, str | None]
+) -> CookieJar:
     """Returns a CookieJar from a key/value dictionary.
 
     :param cj: CookieJar to insert cookies into.

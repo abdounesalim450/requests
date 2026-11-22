@@ -53,6 +53,7 @@ from .cookies import (
     _copy_cookie_jar,
     cookiejar_from_dict,
     get_cookie_header,
+    remove_cookie_by_name,
 )
 from .exceptions import (
     ChunkedEncodingError,
@@ -318,7 +319,7 @@ class Request(RequestHooksMixin):
     json: _t.JsonType
     params: _t.ParamsType
     auth: _t.AuthType
-    cookies: RequestsCookieJar | CookieJar | dict[str, str] | None
+    cookies: RequestsCookieJar | CookieJar | dict[str, str | None] | None
 
     def __init__(
         self,
@@ -329,7 +330,7 @@ class Request(RequestHooksMixin):
         data: _t.DataType = None,
         params: _t.ParamsType = None,
         auth: _t.AuthType = None,
-        cookies: RequestsCookieJar | CookieJar | dict[str, str] | None = None,
+        cookies: RequestsCookieJar | CookieJar | dict[str, str | None] | None = None,
         hooks: _t.HooksInputType | None = None,
         json: _t.JsonType = None,
     ) -> None:
@@ -400,6 +401,7 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
     url: str | None
     headers: CaseInsensitiveDict[str | bytes]
     _cookies: RequestsCookieJar | CookieJar | None
+    _removed_cookie_names: set[str]
     body: _t.BodyType
     hooks: dict[str, list[_t.HookType]]
     _body_position: int | object | None
@@ -414,6 +416,9 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
         # The `CookieJar` used to create the Cookie header will be stored here
         # after prepare_cookies is called
         self._cookies = None
+        #: Cookie names explicitly unset with a None value for this
+        #: request, so redirects do not restore them from the session.
+        self._removed_cookie_names = set()
         #: request body to send to the server.
         self.body = None
         #: dictionary of callback hooks, for internal usage.
@@ -430,7 +435,7 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
         data: _t.DataType = None,
         params: _t.ParamsType = None,
         auth: _t.AuthType = None,
-        cookies: RequestsCookieJar | CookieJar | dict[str, str] | None = None,
+        cookies: RequestsCookieJar | CookieJar | dict[str, str | None] | None = None,
         hooks: _t.HooksInputType | None = None,
         json: _t.JsonType = None,
     ) -> None:
@@ -459,6 +464,7 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
         p.url = self.url
         p.headers = self.headers.copy() if self.headers is not None else None  # type: ignore[assignment]
         p._cookies = _copy_cookie_jar(self._cookies)
+        p._removed_cookie_names = set(getattr(self, "_removed_cookie_names", ()))
         p.body = self.body
         p.hooks = self.hooks
         p._body_position = self._body_position
@@ -697,7 +703,7 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
             self.prepare_content_length(self.body)
 
     def prepare_cookies(
-        self, cookies: RequestsCookieJar | CookieJar | dict[str, str] | None
+        self, cookies: RequestsCookieJar | CookieJar | dict[str, str | None] | None
     ) -> None:
         """Prepares the given HTTP cookie data.
 
@@ -709,9 +715,29 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
         to ``prepare_cookies`` will have no actual effect, unless the "Cookie"
         header is removed beforehand.
         """
+        removed_names = getattr(self, "_removed_cookie_names", None)
+        if removed_names is None:
+            removed_names = self._removed_cookie_names = set()
         if isinstance(cookies, cookielib.CookieJar):
-            self._cookies = cookies
+            removed_names.update(
+                cookie.name for cookie in cookies if cookie.value is None
+            )
+            if any(cookie.value is None for cookie in cookies):
+                # A None value unsets the cookie rather than serializing
+                # to a malformed header. Copy so the caller's jar is
+                # not mutated.
+                copied = _copy_cookie_jar(cookies)
+                copied_jar = cast("CookieJar", copied)
+                for name in {cookie.name for cookie in cookies if cookie.value is None}:
+                    remove_cookie_by_name(copied_jar, name)
+                self._cookies = copied_jar
+            else:
+                self._cookies = cookies
         else:
+            if cookies:
+                removed_names.update(
+                    name for name, value in cookies.items() if value is None
+                )
             self._cookies = cookiejar_from_dict(cookies)
 
         cookies_jar = cast("CookieJar", self._cookies)

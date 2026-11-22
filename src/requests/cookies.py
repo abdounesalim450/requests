@@ -12,7 +12,7 @@ from __future__ import annotations
 import calendar
 import copy
 import time
-from collections.abc import Iterator, MutableMapping
+from collections.abc import Iterator, Mapping, MutableMapping
 from http.cookiejar import Cookie, CookieJar, CookiePolicy
 from typing import TYPE_CHECKING, Any, TypeVar, overload
 
@@ -491,7 +491,7 @@ def _copy_cookie_jar(jar: CookieJar | None) -> CookieJar | None:  # type: ignore
     return new_jar
 
 
-def create_cookie(name: str, value: str, **kwargs: Any) -> Cookie:
+def create_cookie(name: str, value: str | None, **kwargs: Any) -> Cookie:
     """Make a cookie from underspecified parameters.
 
     By default, the pair of `name` and `value` will be set for the domain ''
@@ -562,7 +562,7 @@ _CookieJarT = TypeVar("_CookieJarT", bound=CookieJar)
 
 @overload
 def cookiejar_from_dict(
-    cookie_dict: dict[str, str] | None,
+    cookie_dict: Mapping[str, str | None] | None,
     cookiejar: None = None,
     overwrite: bool = True,
 ) -> RequestsCookieJar: ...
@@ -570,18 +570,24 @@ def cookiejar_from_dict(
 
 @overload
 def cookiejar_from_dict(
-    cookie_dict: dict[str, str] | None,
+    cookie_dict: Mapping[str, str | None] | None,
     cookiejar: _CookieJarT,
     overwrite: bool = True,
 ) -> _CookieJarT: ...
 
 
 def cookiejar_from_dict(
-    cookie_dict: dict[str, str] | None,
+    cookie_dict: Mapping[str, str | None] | None,
     cookiejar: CookieJar | None = None,
     overwrite: bool = True,
 ) -> CookieJar:
     """Returns a CookieJar from a key/value dictionary.
+
+    A value of ``None`` unsets any cookie with that name already in the
+    jar (over all domains and paths, mirroring ``RequestsCookieJar.set``)
+    and is never stored itself, so it cannot serialize to a malformed
+    ``Cookie`` header. An empty string is distinct and stored as a
+    cookie with an empty value.
 
     :param cookie_dict: Dict of key/values to insert into CookieJar.
     :param cookiejar: (optional) A cookiejar to add the cookies to.
@@ -595,16 +601,25 @@ def cookiejar_from_dict(
     if cookie_dict is not None:
         names_from_jar = [cookie.name for cookie in cookiejar]
         for name in cookie_dict:
-            if overwrite or (name not in names_from_jar):
-                cookiejar.set_cookie(create_cookie(name, cookie_dict[name]))
+            value = cookie_dict[name]
+            if value is None:
+                # Removal is not a replacement, so it applies even when
+                # overwrite is False.
+                remove_cookie_by_name(cookiejar, name)
+            elif overwrite or (name not in names_from_jar):
+                cookiejar.set_cookie(create_cookie(name, value))
 
     return cookiejar
 
 
 def merge_cookies(
-    cookiejar: CookieJar, cookies: dict[str, str] | CookieJar | None
+    cookiejar: CookieJar, cookies: Mapping[str, str | None] | CookieJar | None
 ) -> CookieJar:
     """Add cookies to cookiejar and returns a merged CookieJar.
+
+    Cookies whose value is ``None``, whether given in a dictionary or
+    as a cookie in a CookieJar, unset any cookie with that name in
+    ``cookiejar`` instead of being merged in.
 
     :param cookiejar: CookieJar object to add the cookies to.
     :param cookies: Dictionary or CookieJar object to be added.
@@ -613,13 +628,24 @@ def merge_cookies(
     if not isinstance(cookiejar, cookielib.CookieJar):  # runtime guard
         raise ValueError("You can only merge into CookieJar")
 
-    if isinstance(cookies, dict):
-        cookiejar = cookiejar_from_dict(cookies, cookiejar=cookiejar, overwrite=False)
-    elif isinstance(cookies, cookielib.CookieJar):
-        if update_method := getattr(cookiejar, "update", None):
+    if isinstance(cookies, cookielib.CookieJar):
+        source_cookies = list(cookies)
+        if any(cookie.value is None for cookie in source_cookies):
+            has_update = getattr(cookiejar, "update", None) is not None
+            for cookie_in_jar in source_cookies:
+                if cookie_in_jar.value is None:
+                    remove_cookie_by_name(cookiejar, cookie_in_jar.name)
+                elif has_update:
+                    # Mirror RequestsCookieJar.update(), which copies.
+                    cookiejar.set_cookie(copy.copy(cookie_in_jar))
+                else:
+                    cookiejar.set_cookie(cookie_in_jar)
+        elif update_method := getattr(cookiejar, "update", None):
             update_method(cookies)
         else:
             for cookie_in_jar in cookies:
                 cookiejar.set_cookie(cookie_in_jar)
+    elif isinstance(cookies, Mapping):
+        cookiejar = cookiejar_from_dict(cookies, cookiejar=cookiejar, overwrite=False)
 
     return cookiejar

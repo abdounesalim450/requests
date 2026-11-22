@@ -116,7 +116,7 @@ if TYPE_CHECKING:
 
     HeadersType: TypeAlias = Mapping[str, str | bytes] | None
 
-    CookiesType: TypeAlias = RequestsCookieJar | Mapping[str, str]
+    CookiesType: TypeAlias = RequestsCookieJar | Mapping[str, str | None]
 
     # Building blocks for FilesType
     _FileName: TypeAlias = str | None
@@ -156,7 +156,7 @@ if TYPE_CHECKING:
 
     class BaseRequestKwargs(TypedDict, total=False):
         headers: HeadersType
-        cookies: RequestsCookieJar | CookieJar | dict[str, str] | None
+        cookies: RequestsCookieJar | CookieJar | dict[str, str | None] | None
         files: FilesType
         auth: AuthType
         timeout: TimeoutType
