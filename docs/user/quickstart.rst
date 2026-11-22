@@ -476,6 +476,21 @@ also be passed in to requests::
     >>> r.text
     '{"cookies": {"tasty_cookie": "yum"}}'
 
+When cookies are passed as a ``dict``, setting a cookie's value to
+``None`` unsets it for that request: a session cookie with that name
+will not be sent, and the session's cookie jar is left unchanged.
+This is not the same as an empty string, which sends the cookie with
+an empty value (``name=``)::
+
+    >>> s = requests.Session()
+    >>> s.get('https://httpbin.org/cookies/set/tasty_cookie/yum')
+    >>> r = s.get(
+    ...     'https://httpbin.org/cookies',
+    ...     cookies={'tasty_cookie': None, 'gross_cookie': ''},
+    ... )
+    >>> r.text
+    '{"cookies": {"gross_cookie": ""}}'
+
 
 Redirection and History
 -----------------------

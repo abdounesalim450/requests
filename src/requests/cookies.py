@@ -232,6 +232,9 @@ class RequestsCookieJar(CookieJar, MutableMapping[str, str | None]):  # type: ig
         """Dict-like set() that also supports optional domain and path args in
         order to resolve naming collisions from using one cookie jar over
         multiple domains.
+
+        A value of ``None`` removes the cookie from the jar, while
+        ``''`` sets it with an empty value (sent as ``name=``).
         """
         # support client code that unsets cookies by assignment of a None value:
         if value is None:
@@ -586,8 +589,8 @@ def cookiejar_from_dict(
     A value of ``None`` unsets any cookie with that name already in the
     jar (over all domains and paths, mirroring ``RequestsCookieJar.set``)
     and is never stored itself, so it cannot serialize to a malformed
-    ``Cookie`` header. An empty string is distinct and stored as a
-    cookie with an empty value.
+    ``Cookie`` header. An empty string (``''``) is distinct and stored
+    as a cookie with an empty value, sent as ``name=``.
 
     :param cookie_dict: Dict of key/values to insert into CookieJar.
     :param cookiejar: (optional) A cookiejar to add the cookies to.
@@ -619,7 +622,8 @@ def merge_cookies(
 
     Cookies whose value is ``None``, whether given in a dictionary or
     as a cookie in a CookieJar, unset any cookie with that name in
-    ``cookiejar`` instead of being merged in.
+    ``cookiejar`` instead of being merged in. An empty string
+    (``''``) is merged in and sent as ``name=``.
 
     :param cookiejar: CookieJar object to add the cookies to.
     :param cookies: Dictionary or CookieJar object to be added.

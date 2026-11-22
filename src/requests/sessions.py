@@ -606,7 +606,9 @@ class Session(SessionRedirectMixin):
         :param headers: (optional) Dictionary of HTTP Headers to send with the
             :class:`Request`.
         :param cookies: (optional) Dict or CookieJar object to send with the
-            :class:`Request`.
+            :class:`Request`. In a dict, a value of ``None`` unsets the
+            session cookie with that name for this request only, while
+            ``''`` sends it with an empty value (``name=``).
         :param files: (optional) Dictionary of ``'filename': file-like-objects``
             for multipart encoding upload.
         :param auth: (optional) Auth tuple or callable to enable

@@ -300,6 +300,8 @@ class Request(RequestHooksMixin):
         take place.
     :param auth: Auth handler or (user, pass) tuple.
     :param cookies: dictionary or CookieJar of cookies to attach to this request.
+        In a dictionary, a value of ``None`` unsets that cookie for this
+        request, while ``''`` sends it with an empty value (``name=``).
     :param hooks: dictionary of callback hooks, for internal usage.
 
     Usage::
@@ -714,6 +716,10 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):
         :class:`PreparedRequest <PreparedRequest>` object. Any subsequent calls
         to ``prepare_cookies`` will have no actual effect, unless the "Cookie"
         header is removed beforehand.
+
+        A cookie with a value of ``None`` unsets that cookie for this
+        request and is never sent, while ``''`` sends it with an empty
+        value (``name=``).
         """
         removed_names = getattr(self, "_removed_cookie_names", None)
         if removed_names is None:
